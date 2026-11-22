@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.typo-works.weekly</string>
+    <!-- No absolute home path here (this repo is public): the shell expands $HOME.
+         typo.weekly reads its own secrets from .env; nothing is sourced here.
+         Install: copy to ~/Library/LaunchAgents, then launchctl bootstrap gui/$(id -u) <plist>. -->
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/zsh</string>
+        <string>-c</string>
+        <string>cd "$HOME/dev/automations/typo-works" &amp;&amp; mkdir -p logs &amp;&amp; exec &gt;&gt; logs/weekly.log 2&gt;&amp;1 &amp;&amp; export PATH="$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin" &amp;&amp; exec uv run python -m typo.weekly</string>
+    </array>
+    <key>StartCalendarInterval</key>
+    <dict>
+        <key>Weekday</key>
+        <integer>0</integer>
+        <key>Hour</key>
+        <integer>10</integer>
+        <key>Minute</key>
+        <integer>0</integer>
+    </dict>
+    <key>RunAtLoad</key>
+    <false/>
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>/usr/local/bin:/usr/bin:/bin</string>
+    </dict>
+</dict>
+</plist>

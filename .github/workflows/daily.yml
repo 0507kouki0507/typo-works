@@ -1,0 +1,112 @@
+name: daily
+
+on:
+  schedule:
+    - cron: "0 12 * * *" # 21:00 JST
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# One fixed group: a manual run and the cron run never process the same work at once.
+concurrency:
+  group: daily
+  cancel-in-progress: false
+
+env:
+  UV_PYTHON: "3.12" # pyproject.toml: requires-python >=3.12
+
+jobs:
+  post:
+    if: github.ref == 'refs/heads/main' # nothing is posted off main: its catalog could not be saved
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - uses: astral-sh/setup-uv@1db35dd8eee11c5894872e0b383ae6c406cf738d # v10.4.0
+
+      - run: uv sync --frozen
+
+      - name: Post one work
+        id: daily
+        run: uv run python -m typo.daily
+        env:
+          IG_ACCESS_TOKEN: ${{ secrets.IG_ACCESS_TOKEN }}
+          IG_USER_ID: ${{ secrets.IG_USER_ID }}
+          SUZURI_API_KEY: ${{ secrets.SUZURI_API_KEY }}
+
+      # Runs after failure and cancellation too: listings and posts are not idempotent, so what
+      # the run recorded must reach main. A failed daily step keeps the job failed (the alert).
+      - name: Commit the catalog
+        if: always() && steps.daily.outcome != 'skipped'
+        run: |
+          set -euo pipefail
+          if git diff --quiet -- works/catalog.json; then
+            echo "catalog unchanged"
+            exit 0
+          fi
+          # pull --rebase rewrites the commit, so it needs an identity too
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -- works/catalog.json
+          git commit -m "chore: update catalog [skip ci]"
+
+          # From here every way out goes through rescue(): no `set -e`.
+          set +e
+
+          # Last resort: the record of a listing or a post must not die with the runner.
+          # The catalog holds no secrets, so it goes to the log, the step summary and a branch.
+          rescue() {
+            echo "::error::could not push the catalog to main; preserving it"
+            git show HEAD:works/catalog.json
+            {
+              echo "### Catalog not pushed to main"
+              echo "Recover it from branch catalog-rescue-${GITHUB_RUN_ID}, or from this copy:"
+              echo '```json'
+              git show HEAD:works/catalog.json
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
+            git push origin "HEAD:refs/heads/catalog-rescue-${GITHUB_RUN_ID}" || echo "::error::rescue branch push failed"
+            exit 1
+          }
+
+          rebase_in_progress() {
+            [ -d "$(git rev-parse --git-path rebase-merge)" ] || [ -d "$(git rev-parse --git-path rebase-apply)" ]
+          }
+
+          for attempt in 1 2 3 4 5; do
+            if git push origin HEAD:main; then
+              exit 0
+            fi
+            echo "push failed (attempt ${attempt}), rebasing"
+            if ! git pull --rebase origin main; then
+              if rebase_in_progress; then
+                git rebase --abort || true
+                rescue # a real conflict: retrying cannot help
+              fi
+              echo "pull failed without a conflict (attempt ${attempt})"
+            fi
+            sleep $((attempt * 5))
+          done
+          rescue
+
+  stock:
+    needs: post
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: main # the catalog as post pushed it
+          persist-credentials: false
+
+      - uses: astral-sh/setup-uv@1db35dd8eee11c5894872e0b383ae6c406cf738d # v10.4.0
+
+      - run: uv sync --frozen
+
+      - name: Check the stock
+        run: uv run python -m typo.stock

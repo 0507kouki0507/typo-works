@@ -1,0 +1,13 @@
+[project]
+name = "typo-works"
+version = "0.1.0"
+description = "Typographic works made together with AI"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = ["pillow", "httpx"]
+
+[dependency-groups]
+dev = ["pytest"]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
